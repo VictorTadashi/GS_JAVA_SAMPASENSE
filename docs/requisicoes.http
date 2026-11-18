@@ -1,0 +1,216 @@
+### =====================================================================
+### SampaSense API — roteiro de demonstração
+### Abra no IntelliJ (HTTP Client) ou copie para o Postman/Insomnia.
+### IDs considerando o banco recém-criado com o seed automático:
+###   Ponto 1 = Vale do Anhangabaú (não crítico) -> sensores 1 (PLV), 2 e 3 (NIV)
+###   Ponto 2 = Túnel do Anhangabaú (CRÍTICO)    -> sensores 4 (PLV), 5 e 6 (NIV)
+###   Ponto 3 = Baixada do Glicério             -> sensores 7 (PLV), 8 e 9 (NIV)
+### Limites: chuva 30 mm | nível 30 cm | subida 10 cm entre leituras
+### =====================================================================
+
+@baseUrl = http://localhost:8080
+
+### ---------- AUTENTICAÇÃO (rode primeiro) ----------
+### Login com o usuário de demonstração: o token fica salvo em {{token}}
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "operador@sampasense.com", "senha": "Sampa@2026" }
+
+> {% client.global.set("token", response.body.token); %}
+
+### Cadastro de um novo usuário (rota pública)
+POST {{baseUrl}}/api/usuarios
+Content-Type: application/json
+
+{ "nome": "Operador CET 02", "email": "cet02@sampasense.com", "senha": "senha123" }
+
+### 401 - rota protegida sem token
+GET {{baseUrl}}/api/pontos
+
+### 401 - senha errada
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "operador@sampasense.com", "senha": "errada" }
+
+### 0. Situação inicial do Vale (NORMAL)
+GET {{baseUrl}}/api/pontos/1/risco
+
+### ---------- CENÁRIO A: Vale do Anhangabaú (bloqueio com operador) ----------
+
+### 1. Chuva forte prevista -> ATENÇÃO (WhatsApp, SMS, totem amarelo)
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 1 }, "valor": 42.0 }
+
+### 2. Água subindo rápido (5 -> 18 cm) -> ALERTA (sirene, Wi-Fi emergência, Cell Broadcast)
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 2 }, "valor": 18.0 }
+
+### 3. Primeiro sensor passa do limite -> continua ALERTA (falta confirmação)
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 2 }, "valor": 35.0 }
+
+### 4. Segundo sensor confirma -> BLOQUEIO (recomendação PENDENTE para o operador)
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 3 }, "valor": 33.0 }
+
+### 5. Totem / Wi-Fi: orientação e pontos seguros
+GET {{baseUrl}}/api/pontos/1/risco
+
+### 6. Rota acessível (idosos e PcD)
+GET {{baseUrl}}/api/pontos/1/pontos-seguros?acessivel=true
+
+### 7. Operador vê as recomendações pendentes
+GET {{baseUrl}}/api/bloqueios?status=PENDENTE
+Authorization: Bearer {{token}}
+
+### 8. Operador confirma com um clique -> alerta SEMAFORO
+PUT {{baseUrl}}/api/bloqueios/1/confirmar
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "operador": "Operador CET 01" }
+
+### 9. Histórico de alertas do evento
+GET {{baseUrl}}/api/eventos/1/alertas
+Authorization: Bearer {{token}}
+
+### 10. Água baixa nos dois sensores
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 2 }, "valor": 8.0 }
+
+###
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 3 }, "valor": 6.0 }
+
+### 11. Morador confirma "já baixou" -> evento ENCERRADO
+POST {{baseUrl}}/api/eventos/1/confirmacoes
+Content-Type: application/json
+
+{ "tipo": "BAIXOU" }
+
+### ---------- CENÁRIO B: Túnel do Anhangabaú (crítico, bloqueio automático) ----------
+
+### 12. Água sobe de uma vez -> ALERTA
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 5 }, "valor": 40.0 }
+
+### 13. Segundo sensor confirma -> BLOQUEIO AUTOMÁTICO (semáforos fechados sem esperar operador)
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 6 }, "valor": 38.0 }
+
+###
+GET {{baseUrl}}/api/bloqueios
+Authorization: Bearer {{token}}
+
+### ---------- CENÁRIO C: Glicério (confirmação cidadã) ----------
+
+### 14. Chuva prevista -> ATENÇÃO
+POST {{baseUrl}}/api/leituras
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "sensor": { "id": 7 }, "valor": 35.0 }
+
+### 15. Morador marca "alagou aqui" -> ALERTA (use o id do evento retornado acima)
+POST {{baseUrl}}/api/eventos/3/confirmacoes
+Content-Type: application/json
+
+{ "tipo": "ALAGOU" }
+
+### ---------- Tratamento de exceções ----------
+
+### 400 - campos inválidos
+POST {{baseUrl}}/api/pontos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "nome": "", "tipo": "VALE" }
+
+### 400 - enum inválido
+POST {{baseUrl}}/api/eventos/1/confirmacoes
+Content-Type: application/json
+
+{ "tipo": "TALVEZ" }
+
+### 404 - registro inexistente
+GET {{baseUrl}}/api/sensores/999
+Authorization: Bearer {{token}}
+
+### 422 - regra de negócio: bloqueio já decidido
+PUT {{baseUrl}}/api/bloqueios/1/confirmar
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "operador": "Operador CET 02" }
+
+### 409 - remover ponto com sensores vinculados
+DELETE {{baseUrl}}/api/pontos/1
+Authorization: Bearer {{token}}
+
+### ---------- CRUD de exemplo ----------
+
+###
+POST {{baseUrl}}/api/pontos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "nome": "Túnel Exemplo",
+  "tipo": "TUNEL",
+  "bairro": "Pinheiros",
+  "latitude": -23.5670,
+  "longitude": -46.6920,
+  "critico": true,
+  "limiteChuvaMm": 25.0,
+  "limiteNivelCm": 20.0,
+  "limiteSubidaCm": 8.0
+}
+
+###
+POST {{baseUrl}}/api/sensores
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "codigo": "NIV-EXE-01", "tipo": "NIVEL_AGUA", "ponto": { "id": 4 } }
+
+###
+POST {{baseUrl}}/api/pontos-seguros
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "nome": "Escola Parceira Exemplo",
+  "tipo": "ESCOLA",
+  "endereco": "Rua Exemplo, 100 (simulado)",
+  "latitude": -23.5650,
+  "longitude": -46.6900,
+  "acessivel": true,
+  "capacidade": 150,
+  "pontoMonitorado": { "id": 4 }
+}
